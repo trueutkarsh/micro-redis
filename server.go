@@ -46,7 +46,6 @@ func (s *Server) Run() {
 		}
 		go s.handleConnection(conn)
 	}
-	// parse them as array messages
 }
 
 func (s *Server) handleConnection(conn net.Conn) {
@@ -79,6 +78,7 @@ func (s *Server) handleConnection(conn net.Conn) {
 func (s *Server) processRESP(msg string) (interface{}, error) {
 	s.lock.Lock()         // aquire lock
 	defer s.lock.Unlock() // release lock when processing done
+
 	commands, err := UnmarshalResp(msg)
 	if err != nil {
 		return "", err
