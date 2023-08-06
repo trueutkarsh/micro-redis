@@ -71,7 +71,7 @@ func (s *Server) handleConnection(conn net.Conn) {
 		}
 	}
 	if err := scanner.Err(); err != nil {
-		log.Printf("Failed to read from connection: %v", err)
+		fmt.Printf("Failed to read from connection: %v", err)
 	}
 }
 
