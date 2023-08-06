@@ -18,10 +18,10 @@ type Value struct {
 
 type Storage struct {
 	data       map[Key]Value
-	clear_freq time.Time
+	clear_freq time.Duration
 }
 
-func NewStorage(freq time.Time) *Storage {
+func NewStorage(freq time.Duration) *Storage {
 	result := Storage{
 		data:       make(map[Key]Value),
 		clear_freq: freq,
@@ -255,4 +255,13 @@ func (s *Storage) Keys(pattern string) ([]Key, error) {
 	}
 	return result, nil
 
+}
+
+// Basic expiry algorithm
+func (s *Storage) ClearExpiredKeys() {
+	for k, v := range s.data {
+		if v.expiry.Before(time.Now()) {
+			delete(s.data, k)
+		}
+	}
 }
