@@ -1,12 +1,16 @@
 package microredis
 
 import (
+	"bufio"
+	"errors"
+	"fmt"
 	"log"
 	"net"
 	"os"
+	"strconv"
+	"strings"
 	"sync"
 	"time"
-	//"github.com/mediocregopher/radix/v4/resp/resp3"
 )
 
 type Server struct {
@@ -28,12 +32,240 @@ func NewServer(address string, port string, clear_freq time.Duration) *Server {
 
 func (s *Server) Run() {
 	// open a tcp connection
-	listen, err := net.Listen("tcp", s.address+":"+s.port)
+	listener, err := net.Listen("tcp", s.address+":"+s.port)
 	if err != nil {
 		log.Fatal(err)
 		os.Exit(1)
 	}
 
 	// listen for messages
+	for {
+		conn, err := listener.Accept()
+		if err != nil {
+			log.Fatal(err)
+		}
+		go s.handleConnection(conn)
+	}
 	// parse them as array messages
+}
+
+func (s *Server) handleConnection(conn net.Conn) {
+	defer conn.Close()
+
+	scanner := bufio.NewScanner(conn)
+	for scanner.Scan() {
+		line := scanner.Text()
+		if line == "quit" {
+			break
+		} else {
+			var result string
+			response, err := s.processRESP(line)
+			if err != nil {
+				result = MarshalResp(err)
+			} else {
+				result = MarshalResp(response)
+			}
+			if _, err := conn.Write([]byte(result)); err != nil {
+				fmt.Printf("Failed to write response: %v\n", err)
+				return
+			}
+		}
+	}
+	if err := scanner.Err(); err != nil {
+		log.Printf("Failed to read from connection: %v", err)
+	}
+}
+
+func (s *Server) processRESP(msg string) (interface{}, error) {
+	s.lock.Lock()         // aquire lock
+	defer s.lock.Unlock() // release lock when processing done
+	commands, err := UnmarshalResp(msg)
+	if err != nil {
+		return "", err
+	}
+	switch commands[0] {
+	case "GET":
+		if len(commands) > 2 {
+			return nil, errors.New("ERR Wrong number of arguments")
+		}
+		result := s.db.Get(Key(commands[1]))
+		if result == nil {
+			return nil, nil
+		} else {
+			return *result, nil
+		}
+
+	case "SET":
+		if len(commands) > 7 || len(commands) < 3 {
+			return nil, errors.New("ERR Wrong number of commands")
+		}
+
+		key := Key(commands[1])
+		val := commands[2]
+		var exp *time.Time
+		ret_old_val := false
+		keep_ttl := false
+		set_if_exists := false
+		set_if_not_exists := false
+		expiry_set := false
+
+		args := make(map[string]string)
+
+		i := 3
+		for {
+			if i == len(commands) {
+				break
+			}
+			if strings.ToUpper(commands[i]) == "NX" {
+				args["NX"] = "true"
+				if _, prs := args["XX"]; prs {
+					return nil, errors.New("ERR Invalid args NX and XX can't be present together")
+				}
+				set_if_not_exists = true
+				i += 1
+			} else if strings.ToUpper(commands[i]) == "XX" {
+				args["XX"] = "true"
+				if _, prs := args["NX"]; prs {
+					return nil, errors.New("ERR Invalid args NX and XX can't be present together")
+				}
+				set_if_exists = true
+				i += 1
+			} else if strings.ToUpper(commands[i]) == "GET" {
+				ret_old_val = true
+				i += 1
+			} else if strings.ToUpper(commands[i]) == "EX" {
+				if !expiry_set {
+					sec, err := strconv.ParseFloat(commands[i+1], 64)
+					if err != nil {
+						return nil, errors.New(fmt.Sprintf("ERR Invalid args, unable to parse %s", commands[i+1]))
+					}
+					*exp = time.Now().Add(time.Duration(float64(sec) * float64(time.Second)))
+					i += 2
+					expiry_set = true
+				} else {
+					return nil, errors.New("Invalid Args, multiple expiry provided")
+				}
+			} else if strings.ToUpper(commands[i]) == "PX" {
+				if !expiry_set {
+					milsec, err := strconv.ParseInt(commands[i+1], 10, 64)
+					if err != nil {
+						return nil, errors.New(fmt.Sprintf("ERR Invalid args, unable to parse %s", commands[i+1]))
+					}
+					*exp = time.Now().Add(time.Duration(float64(milsec) * float64(time.Millisecond)))
+					i += 2
+					expiry_set = true
+				} else {
+					return nil, errors.New("Invalid Args, multiple expiry provided")
+				}
+			} else if strings.ToUpper(commands[i]) == "EXAT" {
+				if !expiry_set {
+					sec, err := strconv.ParseInt(commands[i+1], 10, 64)
+					if err != nil {
+						return nil, errors.New(fmt.Sprintf("ERR Invalid args, unable to parse %s", commands[i+1]))
+					}
+					*exp = time.Unix(sec, 0)
+					i += 2
+					expiry_set = true
+				} else {
+					return nil, errors.New("Invalid Args, multiple expiry provided")
+				}
+			} else if strings.ToUpper(commands[i]) == "PXAT" {
+				if !expiry_set {
+					milsec, err := strconv.ParseInt(commands[i+1], 10, 64)
+					if err != nil {
+						return nil, errors.New(fmt.Sprintf("ERR Invalid args, unable to parse %s", commands[i+1]))
+					}
+					*exp = time.Unix(0, milsec*1000)
+					i += 2
+					expiry_set = true
+				} else {
+					return nil, errors.New("Invalid Args, multiple expiry provided")
+				}
+			} else if strings.ToUpper(commands[i]) == "KEEPTTL" {
+				if !expiry_set {
+					exp = nil
+					i += 1
+					expiry_set = true
+				} else {
+					return nil, errors.New("Invalid Args, multiple expiry provided")
+				}
+			} else {
+				return nil, errors.New(fmt.Sprintf("Invalid Arg: %s", commands[i]))
+			}
+
+		}
+
+		success, old_val := s.db.Set(key, val, exp, ret_old_val, keep_ttl, set_if_exists, set_if_not_exists)
+		if !success {
+			return nil, nil
+		} else {
+			if !ret_old_val {
+				return "OK", nil
+			} else {
+				return old_val, nil
+			}
+		}
+
+	case "DEL":
+		if len(commands) < 2 {
+			return nil, errors.New("ERR Invalid number of args")
+		}
+		keys := make([]Key, 0)
+		for _, c := range commands[1:] {
+			keys = append(keys, Key(c))
+		}
+		return s.db.Del(keys), nil
+
+	case "EXPIRE":
+		if len(commands) < 3 || len(commands) > 4 {
+			return nil, errors.New("ERR invalid number of args")
+		}
+
+		key := Key(commands[1])
+		secs, err := strconv.ParseInt(commands[2], 10, 64)
+		if err != nil {
+			return nil, errors.New(fmt.Sprintf("ERR Invalid arg: Unable to parse sec argument %s", commands[2]))
+		}
+		set_if_no_expiry := false
+		set_if_expiry := false
+		set_if_gt := false
+		set_if_lt := false
+
+		if len(commands) == 4 {
+			if commands[3] == "NX" {
+				set_if_no_expiry = true
+			} else if commands[3] == "XX" {
+				set_if_expiry = true
+			} else if commands[3] == "GT" {
+				set_if_gt = true
+			} else if commands[3] == "LT" {
+				set_if_lt = true
+			}
+		}
+
+		return s.db.Expire(key, secs, set_if_no_expiry, set_if_expiry, set_if_gt, set_if_lt), nil
+
+	case "TTL":
+		if len(commands) != 2 {
+			return nil, errors.New("ERR Invalid number of args")
+		}
+		result := s.db.TTL(Key(commands[1]))
+		return result, nil
+
+	case "KEYS":
+		if len(commands) != 2 {
+			return nil, errors.New("ERR Invalid number of args")
+		}
+
+		result, err := s.db.Keys(commands[1])
+		if err != nil {
+			return nil, err
+		} else {
+			return result, nil
+		}
+
+	default:
+		return nil, errors.New(fmt.Sprintf("Invalid command %s", commands[0]))
+	}
+
 }

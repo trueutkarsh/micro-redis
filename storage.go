@@ -117,7 +117,7 @@ func (s *Storage) Del(keys []Key) int {
 
 func (s *Storage) Expire(
 	key Key,
-	secs int,
+	secs int64,
 	set_if_no_expiry bool,
 	set_if_expiry bool,
 	set_if_gt bool,
@@ -227,13 +227,13 @@ func (s *Storage) Expire(
 	}
 }
 
-func (s *Storage) TTL(key Key) int {
+func (s *Storage) TTL(key Key) int64 {
 	val, prs := s.data[key]
 	if prs {
 		if val.expiry == nil {
 			return -1
 		} else {
-			return int(val.expiry.Sub(time.Now()).Seconds())
+			return int64(val.expiry.Sub(time.Now()).Seconds())
 		}
 	} else {
 		return -2
