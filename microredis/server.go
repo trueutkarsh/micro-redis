@@ -50,28 +50,37 @@ func (s *Server) Run() {
 
 func (s *Server) handleConnection(conn net.Conn) {
 	defer conn.Close()
-
 	scanner := bufio.NewScanner(conn)
-	for scanner.Scan() {
+	for {
+		fmt.Println("hello", conn.RemoteAddr())
 		line := scanner.Text()
-		if line == "quit" {
-			break
-		} else {
-			var result string
-			response, err := s.processRESP(line)
-			if err != nil {
-				result = MarshalResp(err)
-			} else {
-				result = MarshalResp(response)
-			}
-			if _, err := conn.Write([]byte(result)); err != nil {
-				fmt.Printf("Failed to write response: %v\n", err)
-				return
-			}
+		// if line == "quit" {
+		// 	return
+		// }
+
+		fmt.Println("received line", line)
+		for scanner.Scan() {
+			line += scanner.Text()
 		}
-	}
-	if err := scanner.Err(); err != nil {
-		fmt.Printf("Failed to read from connection: %v", err)
+		fmt.Println("received line", line)
+
+		if err := scanner.Err(); err != nil {
+			fmt.Printf("Failed to read from connection: %v", err)
+		}
+
+		var result string
+		response, err := s.processRESP(line)
+
+		if err != nil {
+			result = MarshalResp(err)
+		} else {
+			result = MarshalResp(response)
+		}
+		fmt.Printf("Server to send %s", result)
+		if _, err := conn.Write([]byte(result)); err != nil {
+			fmt.Printf("Failed to write response: %v\n", err)
+			return
+		}
 	}
 }
 

@@ -60,6 +60,7 @@ func UnmarshalResp(s string) ([]string, error) {
 		result := strings.Split(s[i:], "\r\n")
 		return result, nil
 	case byte('*'):
+		fmt.Printf("received string -> %s", s)
 		i := strings.Index(s, "\r\n")
 		_, err := strconv.ParseInt(s[1:i], 10, 32)
 		if err != nil {
