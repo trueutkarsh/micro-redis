@@ -29,54 +29,36 @@ func (c *Client) Run() {
 	}
 	defer conn.Close()
 
-	// Start a goroutine to handle incoming messages from the server
-	go func() {
-		scanner := bufio.NewScanner(conn)
-		for scanner.Scan() {
-			fmt.Println("Received from server:", scanner.Text())
-			response, err := UnmarshalResp(scanner.Text())
-			if err != nil {
-				fmt.Println("Err: ", err)
-			} else {
-				fmt.Println(response)
-			}
-		}
-		if err := scanner.Err(); err != nil {
-			fmt.Println("Error reading from server:", err)
-		}
-	}()
-
-	// In the main goroutine, read lines from the terminal, split and marshal them and send them to the server
 	scanner := bufio.NewScanner(os.Stdin)
 	conn_scanner := bufio.NewScanner(conn)
 	fmt.Print(fmt.Sprintf("redis:%s:%s> ", c.address, c.port))
 	for scanner.Scan() {
 		msg := scanner.Text()
+		msg = strings.Trim(msg, " ")
 		if msg == "quit" {
+			_, err := conn.Write([]byte("quit" + "\n"))
+			if err != nil {
+				fmt.Println("Error writing to server:", err)
+			}
 			return
 		}
-		fmt.Println("Input: received this from terminal", msg)
 		marshalled_msg := MarshalResp(strings.Split(msg, " "))
-		fmt.Print("sending this to server", marshalled_msg, conn.LocalAddr())
-		_, err := conn.Write([]byte(marshalled_msg))
+		_, err := conn.Write([]byte(marshalled_msg + "\n"))
 		if err != nil {
 			fmt.Println("Error writing to server:", err)
-			break
+			continue
 		}
 		// read from server
-		line := conn_scanner.Text()
+		time.Sleep(200 * time.Millisecond)
+		line := ""
 		for conn_scanner.Scan() {
-			line += conn_scanner.Text()
+			line = conn_scanner.Text()
+			break
 		}
 
-		if err := conn_scanner.Err(); err != nil {
-			fmt.Printf("Failed to read from connection: %v", err)
-		}
-
-		fmt.Println("Received from server:", line)
-		response, err := UnmarshalResp(scanner.Text())
+		response, err := UnmarshalResp(line)
 		if err != nil {
-			fmt.Println("Err: ", err)
+			fmt.Println("Err:-", err)
 		} else {
 			fmt.Println(response)
 		}

@@ -32,12 +32,13 @@ func NewStorage(freq time.Duration) *Storage {
 func (s *Storage) Get(key Key) *string {
 	result, prs := s.data[key]
 	if prs {
-		if time.Now().After(*result.expiry) {
-			delete(s.data, key)
-			return nil
-		} else {
-			return s.data[key].val
+		if result.expiry != nil {
+			if time.Now().After(*result.expiry) {
+				delete(s.data, key)
+				return nil
+			}
 		}
+		return s.data[key].val
 	}
 	return nil
 }
@@ -154,6 +155,7 @@ func (s *Storage) Expire(
 			if secs > 0 {
 				new_exp := time.Now().Add(time.Duration(float64(secs) * float64(time.Second)))
 				val.expiry = &new_exp
+				s.data[key] = val
 			} else {
 				// delete the key
 				delete(s.data, key)
@@ -169,6 +171,7 @@ func (s *Storage) Expire(
 			if secs > 0 {
 				new_exp := time.Now().Add(time.Duration(float64(secs) * float64(time.Second)))
 				val.expiry = &new_exp
+				s.data[key] = val
 			} else {
 				delete(s.data, key)
 			}
@@ -184,6 +187,7 @@ func (s *Storage) Expire(
 				new_exp := time.Now().Add(time.Duration(float64(secs) * float64(time.Second)))
 				if val.expiry.Before(new_exp) {
 					val.expiry = &new_exp
+					s.data[key] = val
 					return 1
 				} else {
 					return 0
@@ -203,6 +207,7 @@ func (s *Storage) Expire(
 				new_exp := time.Now().Add(time.Duration(float64(secs) * float64(time.Second)))
 				if val.expiry.After(new_exp) {
 					val.expiry = &new_exp
+					s.data[key] = val
 					return 1
 				} else {
 					return 0
@@ -220,6 +225,7 @@ func (s *Storage) Expire(
 	if secs > 0 {
 		new_exp := time.Now().Add(time.Duration(float64(secs) * float64(time.Second)))
 		val.expiry = &new_exp
+		s.data[key] = val
 		return 1
 	} else {
 		delete(s.data, key)
@@ -233,7 +239,14 @@ func (s *Storage) TTL(key Key) int64 {
 		if val.expiry == nil {
 			return -1
 		} else {
-			return int64(val.expiry.Sub(time.Now()).Seconds())
+			result := int64(val.expiry.Sub(time.Now()).Seconds())
+			// negative ttl implies key has expired so clear it
+			if result < 0 {
+				delete(s.data, key)
+				return -2
+			} else {
+				return result
+			}
 		}
 	} else {
 		return -2

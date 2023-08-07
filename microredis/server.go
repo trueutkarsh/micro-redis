@@ -51,21 +51,15 @@ func (s *Server) Run() {
 func (s *Server) handleConnection(conn net.Conn) {
 	defer conn.Close()
 	scanner := bufio.NewScanner(conn)
-	for {
-		fmt.Println("hello", conn.RemoteAddr())
+
+	for scanner.Scan() {
 		line := scanner.Text()
-		// if line == "quit" {
-		// 	return
-		// }
-
-		fmt.Println("received line", line)
-		for scanner.Scan() {
-			line += scanner.Text()
+		if line == "quit" {
+			return
 		}
-		fmt.Println("received line", line)
 
-		if err := scanner.Err(); err != nil {
-			fmt.Printf("Failed to read from connection: %v", err)
+		if line == "" || line == "\n" {
+			continue
 		}
 
 		var result string
@@ -76,18 +70,16 @@ func (s *Server) handleConnection(conn net.Conn) {
 		} else {
 			result = MarshalResp(response)
 		}
-		fmt.Printf("Server to send %s", result)
-		if _, err := conn.Write([]byte(result)); err != nil {
+		if _, err := conn.Write([]byte(result + "\n")); err != nil {
 			fmt.Printf("Failed to write response: %v\n", err)
-			return
+			continue
 		}
 	}
 }
 
 func (s *Server) processRESP(msg string) (interface{}, error) {
-	s.lock.Lock()         // aquire lock
-	defer s.lock.Unlock() // release lock when processing done
-
+	// s.lock.Lock()         // aquire lock
+	// defer s.lock.Unlock() // release lock when processing done
 	commands, err := UnmarshalResp(msg)
 	if err != nil {
 		return "", err
@@ -111,7 +103,7 @@ func (s *Server) processRESP(msg string) (interface{}, error) {
 
 		key := Key(commands[1])
 		val := commands[2]
-		var exp *time.Time
+		var exp time.Time
 		ret_old_val := false
 		keep_ttl := false
 		set_if_exists := false
@@ -148,7 +140,7 @@ func (s *Server) processRESP(msg string) (interface{}, error) {
 					if err != nil {
 						return nil, errors.New(fmt.Sprintf("ERR Invalid args, unable to parse %s", commands[i+1]))
 					}
-					*exp = time.Now().Add(time.Duration(float64(sec) * float64(time.Second)))
+					exp = time.Now().Add(time.Duration(float64(sec) * float64(time.Second)))
 					i += 2
 					expiry_set = true
 				} else {
@@ -160,7 +152,7 @@ func (s *Server) processRESP(msg string) (interface{}, error) {
 					if err != nil {
 						return nil, errors.New(fmt.Sprintf("ERR Invalid args, unable to parse %s", commands[i+1]))
 					}
-					*exp = time.Now().Add(time.Duration(float64(milsec) * float64(time.Millisecond)))
+					exp = time.Now().Add(time.Duration(float64(milsec) * float64(time.Millisecond)))
 					i += 2
 					expiry_set = true
 				} else {
@@ -172,7 +164,7 @@ func (s *Server) processRESP(msg string) (interface{}, error) {
 					if err != nil {
 						return nil, errors.New(fmt.Sprintf("ERR Invalid args, unable to parse %s", commands[i+1]))
 					}
-					*exp = time.Unix(sec, 0)
+					exp = time.Unix(sec, 0)
 					i += 2
 					expiry_set = true
 				} else {
@@ -184,7 +176,7 @@ func (s *Server) processRESP(msg string) (interface{}, error) {
 					if err != nil {
 						return nil, errors.New(fmt.Sprintf("ERR Invalid args, unable to parse %s", commands[i+1]))
 					}
-					*exp = time.Unix(0, milsec*1000)
+					exp = time.Unix(0, milsec*1000)
 					i += 2
 					expiry_set = true
 				} else {
@@ -192,7 +184,7 @@ func (s *Server) processRESP(msg string) (interface{}, error) {
 				}
 			} else if strings.ToUpper(commands[i]) == "KEEPTTL" {
 				if !expiry_set {
-					exp = nil
+					// exp = nil
 					i += 1
 					expiry_set = true
 				} else {
@@ -204,14 +196,24 @@ func (s *Server) processRESP(msg string) (interface{}, error) {
 
 		}
 
-		success, old_val := s.db.Set(key, val, exp, ret_old_val, keep_ttl, set_if_exists, set_if_not_exists)
+		var success bool
+		var old_val *string
+		if keep_ttl || !expiry_set {
+			success, old_val = s.db.Set(key, val, nil, ret_old_val, keep_ttl, set_if_exists, set_if_not_exists)
+		} else {
+			success, old_val = s.db.Set(key, val, &exp, ret_old_val, keep_ttl, set_if_exists, set_if_not_exists)
+		}
 		if !success {
 			return nil, nil
 		} else {
 			if !ret_old_val {
 				return "OK", nil
 			} else {
-				return old_val, nil
+				if old_val == nil {
+					return nil, nil
+				} else {
+					return *old_val, nil
+				}
 			}
 		}
 
