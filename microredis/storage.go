@@ -273,8 +273,10 @@ func (s *Storage) Keys(pattern string) ([]Key, error) {
 // Basic expiry algorithm
 func (s *Storage) ClearExpiredKeys() {
 	for k, v := range s.data {
-		if v.expiry.Before(time.Now()) {
-			delete(s.data, k)
+		if v.expiry != nil {
+			if v.expiry.Before(time.Now()) {
+				delete(s.data, k)
+			}
 		}
 	}
 }

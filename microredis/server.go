@@ -38,6 +38,16 @@ func (s *Server) Run() {
 		os.Exit(1)
 	}
 
+	// background expired keys clean up goroutine
+	go func(s *Server) {
+		for {
+			s.lock.Lock()
+			time.Sleep(s.db.clear_freq)
+			s.db.ClearExpiredKeys()
+			s.lock.Unlock()
+		}
+	}(s)
+
 	// listen for messages
 	for {
 		conn, err := listener.Accept()
@@ -78,8 +88,8 @@ func (s *Server) handleConnection(conn net.Conn) {
 }
 
 func (s *Server) processRESP(msg string) (interface{}, error) {
-	// s.lock.Lock()         // aquire lock
-	// defer s.lock.Unlock() // release lock when processing done
+	s.lock.Lock()         // aquire lock
+	defer s.lock.Unlock() // release lock when processing done
 	commands, err := UnmarshalResp(msg)
 	if err != nil {
 		return "", err

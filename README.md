@@ -20,7 +20,9 @@ go run main.go
 ```
 This will start a redis server in the background and redis client in your terminal.
 Both redis client and server will operate from localhost:6379 address by default.
-You can change it manually inside main.go file.
+Redis server has a third initialization arguement of clear_freq, essentially the freq by which
+you want to clear the expired keys.
+You can change all the arguements manually inside main.go file.
 
 
 **Note**
