@@ -12,6 +12,14 @@ import (
 	"time"
 )
 
+// Server struct denotes the Redis server data type
+// We have address and port as this is where tcp connection
+// will start to listen for connections. Server has an instance
+// to Storage pointer through which it performs data operations
+// Finally there can be multiple redis clients connecting to server
+// and there is a expired keys clean up goroutine as well, so as to
+// maintain consitent state and avoid race conditions we have a mutex
+// pointer lock which essentially guards the storage/db
 type Server struct {
 	db      *Storage
 	address string
@@ -19,6 +27,8 @@ type Server struct {
 	lock    *sync.Mutex
 }
 
+// NewServer creates and initializes a server instance and returns
+// a pointer to it
 func NewServer(address string, port string, clear_freq time.Duration) *Server {
 	result := Server{
 		db:      NewStorage(clear_freq),
@@ -29,6 +39,12 @@ func NewServer(address string, port string, clear_freq time.Duration) *Server {
 	return &result
 }
 
+// Run function is the starting point for Redis server functionality
+// It starts listening for tcp connections with address initialized
+// Then it starts a background goroutine to clear expired keys
+// Finally it accepts connections on listener and and starts
+// a separate goroutine to handle interations with each connection
+// or redis client
 func (s *Server) Run() {
 	// open a tcp connection
 	listener, err := net.Listen("tcp", s.address+":"+s.port)
@@ -52,11 +68,15 @@ func (s *Server) Run() {
 		if err != nil {
 			log.Fatal(err)
 		}
-		go s.handleConnection(conn)
+		go s.HandleConnection(conn)
 	}
 }
 
-func (s *Server) handleConnection(conn net.Conn) {
+// HandleConnection function essentially handles each accepted tcp connection
+// from the Redis client. Then it reads RESP messages from the tcp connection
+// and processes it, get the response, marshal it and send it back to Redis
+// client and do this continuously
+func (s *Server) HandleConnection(conn net.Conn) {
 	defer conn.Close()
 	scanner := bufio.NewScanner(conn)
 
@@ -71,7 +91,7 @@ func (s *Server) handleConnection(conn net.Conn) {
 		}
 
 		var result string
-		response, err := s.processRESP(line)
+		response, err := s.ProcessRESP(line)
 
 		if err != nil {
 			result = MarshalResp(err)
@@ -85,7 +105,10 @@ func (s *Server) handleConnection(conn net.Conn) {
 	}
 }
 
-func (s *Server) processRESP(msg string) (interface{}, error) {
+// ProcessRESP function unmarshals the msg it receives from tcp connection
+// into an array of commands strings. Then for each command there is a specific
+// db operation which needs to be called and the result from it is returned
+func (s *Server) ProcessRESP(msg string) (interface{}, error) {
 	s.lock.Lock()         // aquire lock
 	defer s.lock.Unlock() // release lock when processing done
 	commands, err := UnmarshalResp(msg)
@@ -117,6 +140,7 @@ func (s *Server) processRESP(msg string) (interface{}, error) {
 
 }
 
+// ProcessRespCommandGet function processes redis command GET
 func (s *Server) ProcessRespCommandGet(commands []string) (interface{}, error) {
 	if len(commands) > 2 {
 		return nil, errors.New("ERR Wrong number of arguments")
@@ -129,6 +153,7 @@ func (s *Server) ProcessRespCommandGet(commands []string) (interface{}, error) {
 	}
 }
 
+// ProcessRespCommandSet function processes redis command SET
 func (s *Server) ProcessRespCommandSet(commands []string) (interface{}, error) {
 	if len(commands) > 7 || len(commands) < 3 {
 		return nil, errors.New("ERR Wrong number of commands")
@@ -251,6 +276,7 @@ func (s *Server) ProcessRespCommandSet(commands []string) (interface{}, error) {
 	}
 }
 
+// ProcessRespCommandDel function processes redis command DEL
 func (s *Server) ProcessRespCommandDel(commands []string) (interface{}, error) {
 	if len(commands) < 2 {
 		return nil, errors.New("ERR Invalid number of args")
@@ -262,6 +288,7 @@ func (s *Server) ProcessRespCommandDel(commands []string) (interface{}, error) {
 	return s.db.Del(keys), nil
 }
 
+// ProcessRespCommandExpire function processes redis command EXPIRE
 func (s *Server) ProcessRespCommandExpire(commands []string) (interface{}, error) {
 	if len(commands) < 3 || len(commands) > 4 {
 		return nil, errors.New("ERR invalid number of args")
@@ -292,6 +319,7 @@ func (s *Server) ProcessRespCommandExpire(commands []string) (interface{}, error
 	return s.db.Expire(key, secs, set_if_no_expiry, set_if_expiry, set_if_gt, set_if_lt), nil
 }
 
+// ProcessRespCommandTTL function processes the redis commmand TTL
 func (s *Server) ProcessRespCommandTTL(commands []string) (interface{}, error) {
 	if len(commands) != 2 {
 		return nil, errors.New("ERR Invalid number of args")
@@ -300,6 +328,7 @@ func (s *Server) ProcessRespCommandTTL(commands []string) (interface{}, error) {
 	return result, nil
 }
 
+// ProcessRespCommandKeys function processes the redis command KEYS
 func (s *Server) ProcessRespCommandKeys(commands []string) (interface{}, error) {
 	if len(commands) != 2 {
 		return nil, errors.New("ERR Invalid number of args")

@@ -7,20 +7,27 @@ import (
 	"time"
 )
 
-// Define type key -> String
+// Key type to denote key in the key value storage
 type Key string
 
-// Define type value -> Struct (String, time)
+// Value type to denote the value in the key value storage
+//
+// For simplicity purpose we are only considering string datatype
 type Value struct {
 	val    *string
 	expiry *time.Time // nil time denotes infinite expiry
 }
 
+// Storage will be the key value in-memory storage where
+// data is the actual data stored and
+// clear_freq is the freq at which expired keys will be cleared
 type Storage struct {
 	data       map[Key]Value
 	clear_freq time.Duration
 }
 
+// NewStorage function to create initialize and return a pointer
+// to the instance of Storage
 func NewStorage(freq time.Duration) *Storage {
 	result := Storage{
 		data:       make(map[Key]Value),
@@ -29,6 +36,8 @@ func NewStorage(freq time.Duration) *Storage {
 	return &result
 }
 
+// Get function to get the value for a key if it exists
+// It also clears the key from storage if it has expired
 func (s *Storage) Get(key Key) *string {
 	result, prs := s.data[key]
 	if prs {
@@ -43,6 +52,12 @@ func (s *Storage) Get(key Key) *string {
 	return nil
 }
 
+// Set function to set a value for a corresponding key with expiry
+// Various options explained as follows
+// ret_old_val means return the old value
+// keepttl means keep the existing ttl (if exists)
+// set_if_exists means ONLY set the value if it already exists
+// set_if_not_exists means ONLY set the value if it does NOT exists
 func (s *Storage) Set(
 	key Key,
 	val string,
@@ -104,6 +119,8 @@ func (s *Storage) Set(
 	}
 }
 
+// Del function to del a set of keys from storage
+// The return value denotes number of keys deleted
 func (s *Storage) Del(keys []Key) int {
 	removed_count := 0
 	for _, key := range keys {
@@ -116,6 +133,16 @@ func (s *Storage) Del(keys []Key) int {
 	return removed_count
 }
 
+// Expire function to expire an existing key after
+// certain number of secs
+// ONLY one other condition should be present through
+// arguments
+// set_if_expiry means only set new expiry if not already set previously
+// set_if_no_expiry means only set new expiry if it already exists
+// set_if_gt means only set new expiry if it is greater than existing expiry
+// set_if_lt means only set new expiry if it is less than existing expiry
+// return 1 if setting new expiry is successful else 0 if it fails due to
+// any of the args above
 func (s *Storage) Expire(
 	key Key,
 	secs int64,
@@ -233,6 +260,9 @@ func (s *Storage) Expire(
 	}
 }
 
+// TTL function to return the time to live of key in seconds
+// returns -1 if key has no expiry and -2 if it does not exists
+// This function also clears the existing key if it has expired
 func (s *Storage) TTL(key Key) int64 {
 	val, prs := s.data[key]
 	if prs {
@@ -253,6 +283,8 @@ func (s *Storage) TTL(key Key) int64 {
 	}
 }
 
+// Keys function filters keys in the storage through a
+// regex pattern and returns the arrays of keys that match
 func (s *Storage) Keys(pattern string) ([]Key, error) {
 	re, err := regexp.Compile(pattern)
 	if err != nil {
@@ -270,7 +302,11 @@ func (s *Storage) Keys(pattern string) ([]Key, error) {
 
 }
 
-// Basic expiry algorithm
+// ClearExpiredKeys function clears the all the keys in storage
+// which have expired. This function is suppose the be run periodically.
+// Note: this function has to be executed in a mutually exclusive way
+// from other functions otherwise might lead to race condition or unexpected
+// behaviour
 func (s *Storage) ClearExpiredKeys() {
 	for k, v := range s.data {
 		if v.expiry != nil {

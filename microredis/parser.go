@@ -7,6 +7,11 @@ import (
 	"strings"
 )
 
+// MarshalResp function takes any valid object and based on its type
+// converts it into a string
+// Note: Since we are only dealing with String datatype as values and
+// limited return value types from Storage class functions this function
+// is minimial in its implementation
 func MarshalResp(i interface{}) string {
 	switch i.(type) {
 	case int64:
@@ -41,6 +46,10 @@ func MarshalResp(i interface{}) string {
 	}
 }
 
+// UnmarshalResp function is opposite to MarshalResp function but rather
+// than returning an interface{} object it returns an array of strings or error
+// The values in these strings could be strings, int or nil (as these are the values)
+// returned by our storage function
 func UnmarshalResp(s string) ([]string, error) {
 	switch s[0] {
 	case byte(':'):
