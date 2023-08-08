@@ -3,10 +3,10 @@ package microredis
 import (
 	"bufio"
 	"fmt"
+	"log"
 	"net"
 	"os"
 	"strings"
-	"time"
 )
 
 type Client struct {
@@ -26,6 +26,7 @@ func (c *Client) Run() {
 	conn, err := net.Dial("tcp", c.address+":"+c.port)
 	if err != nil {
 		fmt.Println("Error connecting to server", err)
+		log.Fatal(err)
 	}
 	defer conn.Close()
 
@@ -49,7 +50,6 @@ func (c *Client) Run() {
 			continue
 		}
 		// read from server
-		time.Sleep(200 * time.Millisecond)
 		line := ""
 		for conn_scanner.Scan() {
 			line = conn_scanner.Text()
@@ -62,7 +62,6 @@ func (c *Client) Run() {
 		} else {
 			fmt.Println(response)
 		}
-		time.Sleep(100 * time.Millisecond)
 		fmt.Print(fmt.Sprintf("redis:%s:%s> ", c.address, c.port))
 	}
 	if err := scanner.Err(); err != nil {
