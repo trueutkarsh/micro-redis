@@ -15,14 +15,23 @@ https://redis.io/commands/set
 
 
 ## How to run
+
+### Server
 ```bash
-go run main.go
+go run cmd/server/main.go -address={address} -port={port} -clearfreq={clearfreq}
 ```
-This will start a redis server in the background and redis client in your terminal.
-Both redis client and server will operate from localhost:6379 address by default.
-Redis server has a third initialization arguement of clear_freq, essentially the freq by which
-you want to clear the expired keys.
-You can change all the arguements manually inside main.go file.
+where ```address``` and ```port``` are the address port you want
+to run the server from. The default values for these flags are
+localhost and 6379. The third flag is clearfreq which determines at
+what rate should the expired keys be cleared out of storage in milliseconds
+
+### Client
+```bash
+go run cmd/client/main.go -address={address} -port={port}
+```
+where ```address``` and ```port``` are the address port you want
+to run the client from and connect the server to.
+
 
 
 **Note**
