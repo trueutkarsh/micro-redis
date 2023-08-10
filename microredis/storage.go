@@ -68,41 +68,12 @@ func (s *Storage) Set(
 	set_if_not_exists bool,
 ) (bool, *string) {
 
-	prev_val, prs := s.data[key]
 	if set_if_exists {
-		if prs {
-			// retain ttl
-			if keep_ttl {
-				exp = prev_val.expiry
-			}
-			s.data[key] = Value{
-				val:    &val,
-				expiry: exp,
-			}
-			if ret_old_val {
-				return true, prev_val.val
-			} else {
-				return true, nil
-			}
-		} else {
-			return false, nil
-		}
+		return s.setIfKeyExists(key, val, exp, ret_old_val, keep_ttl)
 	} else if set_if_not_exists {
-		if !prs {
-			// key not present retaining ttl makes no sense
-			s.data[key] = Value{
-				val:    &val,
-				expiry: exp,
-			}
-			if ret_old_val {
-				return true, prev_val.val
-			} else {
-				return true, nil
-			}
-		} else {
-			return false, nil
-		}
+		return s.setIfKeyNotExists(key, val, exp, ret_old_val, keep_ttl)
 	} else {
+		prev_val, prs := s.data[key]
 		// if prs and keepttl retain ttl
 		if prs && keep_ttl {
 			exp = prev_val.expiry
@@ -116,6 +87,66 @@ func (s *Storage) Set(
 		} else {
 			return true, nil
 		}
+	}
+}
+
+// setIfKeyExists sets the key with value and exp
+// IF the key already exists in the db. It can return
+// old value or keep the existing expiry if the corresponding
+// ret_old_val and keep_ttl flags are set.
+func (s *Storage) setIfKeyExists(
+	key Key,
+	val string,
+	exp *time.Time,
+	ret_old_val bool,
+	keep_ttl bool,
+) (bool, *string) {
+	prev_val, prs := s.data[key]
+	if prs {
+		// retain ttl
+		if keep_ttl {
+			exp = prev_val.expiry
+		}
+		s.data[key] = Value{
+			val:    &val,
+			expiry: exp,
+		}
+		if ret_old_val {
+			return true, prev_val.val
+		} else {
+			return true, nil
+		}
+	} else {
+		return false, nil
+	}
+
+}
+
+// setIfKeyNotExists sets the key with value and exp
+// IF the key DOES NOT exists in the db. It can return
+// old value or keep the existing expiry if the corresponding
+// ret_old_val and keep_ttl flags are set.
+func (s *Storage) setIfKeyNotExists(
+	key Key,
+	val string,
+	exp *time.Time,
+	ret_old_val bool,
+	keep_ttl bool,
+) (bool, *string) {
+	prev_val, prs := s.data[key]
+	if !prs {
+		// key not present retaining ttl makes no sense
+		s.data[key] = Value{
+			val:    &val,
+			expiry: exp,
+		}
+		if ret_old_val {
+			return true, prev_val.val
+		} else {
+			return true, nil
+		}
+	} else {
+		return false, nil
 	}
 }
 
@@ -177,75 +208,19 @@ func (s *Storage) Expire(
 	}
 
 	if set_if_no_expiry {
-		if val.expiry == nil {
-
-			if secs > 0 {
-				new_exp := time.Now().Add(time.Duration(float64(secs) * float64(time.Second)))
-				val.expiry = &new_exp
-				s.data[key] = val
-			} else {
-				// delete the key
-				delete(s.data, key)
-			}
-			return 1
-		} else {
-			return 0
-		}
+		return s.expireIfNoExpiry(key, secs)
 	}
 
 	if set_if_expiry {
-		if val.expiry != nil {
-			if secs > 0 {
-				new_exp := time.Now().Add(time.Duration(float64(secs) * float64(time.Second)))
-				val.expiry = &new_exp
-				s.data[key] = val
-			} else {
-				delete(s.data, key)
-			}
-			return 1
-		} else {
-			return 0
-		}
+		return s.expireIfExpiryExists(key, secs)
 	}
 
 	if set_if_gt {
-		if val.expiry != nil {
-			if secs > 0 {
-				new_exp := time.Now().Add(time.Duration(float64(secs) * float64(time.Second)))
-				if val.expiry.Before(new_exp) {
-					val.expiry = &new_exp
-					s.data[key] = val
-					return 1
-				} else {
-					return 0
-				}
-			} else {
-				delete(s.data, key)
-				return 0
-			}
-		} else {
-			return 0
-		}
+		return s.expireIfExpiryGreater(key, secs)
 	}
 
 	if set_if_lt {
-		if val.expiry != nil {
-			if secs > 0 {
-				new_exp := time.Now().Add(time.Duration(float64(secs) * float64(time.Second)))
-				if val.expiry.After(new_exp) {
-					val.expiry = &new_exp
-					s.data[key] = val
-					return 1
-				} else {
-					return 0
-				}
-			} else {
-				delete(s.data, key)
-				return 0
-			}
-		} else {
-			return 0
-		}
+		return s.expireIfExpiryLesser(key, secs)
 	}
 
 	// base case
@@ -256,6 +231,105 @@ func (s *Storage) Expire(
 		return 1
 	} else {
 		delete(s.data, key)
+		return 0
+	}
+}
+
+// expireIfNoExpire function sets expiry of a key in secs
+// ONLY if expiry is not already set.
+// Note: negative secs means clear the key from db
+func (s *Storage) expireIfNoExpiry(key Key, secs int64) int {
+	val, prs := s.data[key]
+	if !prs {
+		return 0
+	}
+	if val.expiry == nil {
+		if secs > 0 {
+			new_exp := time.Now().Add(time.Duration(float64(secs) * float64(time.Second)))
+			val.expiry = &new_exp
+			s.data[key] = val
+		} else {
+			// delete the key
+			delete(s.data, key)
+		}
+		return 1
+	} else {
+		return 0
+	}
+}
+
+// expireIfExpiryExists function sets expiry of a key in secs ONLY
+// if expiry already exists
+// Note: negative secs means clear the key from db
+func (s *Storage) expireIfExpiryExists(key Key, secs int64) int {
+	val, prs := s.data[key]
+	if !prs {
+		return 0
+	}
+	if val.expiry != nil {
+		if secs > 0 {
+			new_exp := time.Now().Add(time.Duration(float64(secs) * float64(time.Second)))
+			val.expiry = &new_exp
+			s.data[key] = val
+		} else {
+			delete(s.data, key)
+		}
+		return 1
+	} else {
+		return 0
+	}
+}
+
+// expireIfExpiryGreater function sets expiry of a key in secs ONLY
+// if new expiry is further in time than existing expiry
+// Note: negative secs means clear the key from db
+func (s *Storage) expireIfExpiryGreater(key Key, secs int64) int {
+	val, prs := s.data[key]
+	if !prs {
+		return 0
+	}
+	if val.expiry != nil {
+		if secs > 0 {
+			new_exp := time.Now().Add(time.Duration(float64(secs) * float64(time.Second)))
+			if val.expiry.Before(new_exp) {
+				val.expiry = &new_exp
+				s.data[key] = val
+				return 1
+			} else {
+				return 0
+			}
+		} else {
+			delete(s.data, key)
+			return 0
+		}
+	} else {
+		return 0
+	}
+}
+
+// expireIfExpiryLesser function sets expiry of a key in secs ONLY
+// if new expiry is before in time than existing expiry
+// Note: negative secs means clear the key from db
+func (s *Storage) expireIfExpiryLesser(key Key, secs int64) int {
+	val, prs := s.data[key]
+	if !prs {
+		return 0
+	}
+	if val.expiry != nil {
+		if secs > 0 {
+			new_exp := time.Now().Add(time.Duration(float64(secs) * float64(time.Second)))
+			if val.expiry.After(new_exp) {
+				val.expiry = &new_exp
+				s.data[key] = val
+				return 1
+			} else {
+				return 0
+			}
+		} else {
+			delete(s.data, key)
+			return 0
+		}
+	} else {
 		return 0
 	}
 }
