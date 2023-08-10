@@ -21,7 +21,7 @@ func MarshalResp(i interface{}) string {
 	case string:
 		return fmt.Sprintf("$%d#%s#", len(i.(string)), i.(string))
 	case Key:
-		return fmt.Sprintf("$%d#%s#", len(i.(string)), i.(string))
+		return fmt.Sprintf("$%d#%s#", len(i.(Key)), i.(Key))
 	case []string:
 		result := fmt.Sprintf("*%d#", len(i.([]string)))
 		for _, k := range i.([]string) {
@@ -70,7 +70,7 @@ func UnmarshalResp(s string) ([]string, error) {
 		if val == -1 {
 			return []string{"nil"}, nil
 		}
-		result := strings.Split(s[i:], "#")
+		result := strings.Split(s[i+1:len(s)-1], "#")
 		return result, nil
 	case byte('*'):
 		i := strings.Index(s, "#")
