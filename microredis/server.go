@@ -55,8 +55,8 @@ func (s *Server) Run() {
 	// background expired keys clean up goroutine
 	go func(s *Server) {
 		for {
-			s.lock.Lock()
 			time.Sleep(s.db.clear_freq)
+			s.lock.Lock()
 			s.db.ClearExpiredKeys()
 			s.lock.Unlock()
 		}
